@@ -18,5 +18,5 @@ venv/
 .venv/
 
 # Ignore all files in the mnist directory, but do not ignore the directory itself
-mnist/*
-!mnist/
+**/mnist/*
+!**/mnist/
