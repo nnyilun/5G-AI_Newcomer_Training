@@ -1,5 +1,6 @@
 import os
 import struct
+from typing import Callable, Tuple, List 
 import matplotlib.pyplot as plt
 import numpy as np
 from .tensor import Tensor
@@ -73,24 +74,46 @@ def display_predictions(images: Tensor, labels: Tensor, predictions: Tensor, num
         plt.savefig(save_root)
 
 
+def normalize(data: np.ndarray) -> Tuple[np.ndarray]:
+    min_val = np.min(data)
+    max_val = np.max(data)
+    data = (data - min_val) / (max_val - min_val)
+    return data
+
+
 class DataLoader:
-    def __init__(self, data: Tensor, labels: Tensor, batch_size: int):
+    def __init__(self, data, labels, batch_size, shuffle=True, 
+                 preprocess: List[Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]] = None) -> None:
         self.data = data
         self.labels = labels
         self.batch_size = batch_size
-        self.index = 0
+        self.shuffle = shuffle
+        self.preprocess = preprocess
+        self.indices = np.arange(len(data))
+        if self.shuffle:
+            np.random.shuffle(self.indices)
+        self.current_index = 0
 
-    def __iter__(self):
+    def __iter__(self) -> 'DataLoader':
         return self
 
-    def __next__(self):
-        if self.index >= len(self.data):
-            self.index = 0
+    def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
+        if self.current_index >= len(self.data):
+            if self.shuffle:
+                np.random.shuffle(self.indices)
+            self.current_index = 0
             raise StopIteration
-        batch_data = self.data[self.index:self.index + self.batch_size]
-        batch_labels = self.labels[self.index:self.index + self.batch_size]
-        self.index += self.batch_size
+        batch_indices = self.indices[self.current_index:self.current_index + self.batch_size]
+        batch_data = self.data[batch_indices]
+        batch_labels = self.labels[batch_indices]
+        if self.preprocess:
+            for func in self.preprocess:
+                batch_data = func(batch_data)
+        self.current_index += self.batch_size
         return batch_data, batch_labels
+    
+    def __len__(self) -> int:
+        return -(- len(self.data) // self.batch_size)
     
 
 if __name__ == '__main__':

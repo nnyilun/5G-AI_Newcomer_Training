@@ -6,15 +6,15 @@ import numpy as np
 import network.modules as nnm
 from network.tensor import Tensor
 
-isclose = functools.partial(np.isclose, rtol=1.e-9, atol=1.e-9)
+isclose = functools.partial(np.isclose, rtol=1.e-12, atol=1.e-12)
 
 class TestBase:
-    def __init__(self, module_name:str, input_shape:str, model_params:str, test_num: int = 3) -> None:
+    def __init__(self, module_name: str, input_shape: str, model_params: str = None, test_num: int = 3) -> None:
         self.module_name = module_name
         self.test_num = test_num
 
         input_shape = [s.strip() for s in input_shape.split(',')]
-        model_params = [s.strip() for s in model_params.split(',')]
+        model_params = [s.strip() for s in model_params.split(',')] if model_params else []
         keys = set(input_shape + model_params)
         args = [{k: v for k, v in zip(keys, [random.randint(8, 16) for _ in range(len(keys))])} for _ in range(test_num)]
 
@@ -28,13 +28,13 @@ class TestBase:
     def __call__(self) -> None:
         self.run()
 
-    def forward_test(self, test_id:int) -> bool:
+    def forward_test(self, test_id: int) -> bool:
         self.net_out = self.nets[test_id](self.inputs[test_id])
         if self.net_out is None:
             return False
         return isclose(self.net_out, self.torch_out.detach().numpy()).all().item()
 
-    def backward_test(self, test_id:int) -> bool:
+    def backward_test(self, test_id: int) -> bool:
         if self.net_out is None:
             return False
         self.net_grad = self.nets[test_id].backward(Tensor.ones(self.net_out.shape))
@@ -47,7 +47,7 @@ class TestBase:
 
     def run(self) -> None:
         str_len = 40
-        print(f'[\033[36m{self.module_name}\033[0m]{"." * (str_len - len(self.module_name))}')
+        print(f'[\033[35m{self.module_name}\033[0m]{"." * (str_len - len(self.module_name))}')
         result_str = lambda result: '[\033[32mpass\033[0m]' if result else '[\033[31mfail\033[0m]'
 
         _forward_str = '[Forward][pass]'
@@ -64,14 +64,14 @@ class TestLinear(TestBase):
     def __init__(self) -> None:
         super().__init__('Linear', 'Batch, Input_num', 'Input_num, Output_num')
 
-    def forward_test(self, test_id:int) -> bool:
+    def forward_test(self, test_id: int) -> bool:
         self.torch_input = torch.tensor(self.inputs[test_id], requires_grad=True)
         self.torch_weight = torch.tensor(self.nets[test_id].weight, requires_grad=True)
         self.torch_bias = torch.tensor(self.nets[test_id].bias, requires_grad=True)
         self.torch_out = F.linear(input=self.torch_input, weight=self.torch_weight, bias=self.torch_bias)
         return super().forward_test(test_id)
     
-    def backward_test(self, test_id:int) -> bool:
+    def backward_test(self, test_id: int) -> bool:
         ret = super().backward_test(test_id)
         ret &= isclose(self.nets[test_id].weight.grad, self.torch_weight.grad).all().item()
         ret &= isclose(self.nets[test_id].bias.grad, self.torch_bias.grad).all().item()
@@ -79,24 +79,87 @@ class TestLinear(TestBase):
 
 
 class TestConv2d(TestBase):
-    def __init__(self, module_name: str, input_shape: str, model_params: str, test_num: int = 3) -> None:
-        super().__init__(module_name, input_shape, model_params, test_num)
+    def __init__(self) -> None:
+        super().__init__('Conv2d', 'Batch, Channel_In, Height, Width', 'Channel_Out, Channel_In')
+
+    def forward_test(self, test_id: int) -> bool:
+        raise NotImplementedError
+    
+    def backward_test(self, test_id: int) -> bool:
+        raise NotImplementedError
 
 
 class TestSigmoid(TestBase):
-    def __init__(self, module_name: str, input_shape: str, model_params: str, test_num: int = 3) -> None:
-        super().__init__(module_name, input_shape, model_params, test_num)
+    def __init__(self) -> None:
+        super().__init__("Sigmoid", "Batch, Length")
+
+    def forward_test(self, test_id: int) -> bool:
+        self.torch_input = torch.tensor(self.inputs[test_id], requires_grad=True)
+        self.torch_out = torch.sigmoid(self.torch_input)
+        return super().forward_test(test_id)
+    
+    def backward_test(self, test_id: int) -> bool:
+        return super().backward_test(test_id)
 
 
 class TestReLU(TestBase):
-    def __init__(self, module_name: str, input_shape: str, model_params: str, test_num: int = 3) -> None:
-        super().__init__(module_name, input_shape, model_params, test_num)
+    def __init__(self) -> None:
+        super().__init__("ReLU", "Batch, Length")
+
+    def forward_test(self, test_id: int) -> bool:
+        self.torch_input = torch.tensor(self.inputs[test_id], requires_grad=True)
+        self.torch_out = torch.relu(self.torch_input)
+        return super().forward_test(test_id)
+    
+    def backward_test(self, test_id: int) -> bool:
+        return super().backward_test(test_id)
 
 
-class TestTanh(TestBase):
-    def __init__(self, module_name: str, input_shape: str, model_params: str, test_num: int = 3) -> None:
-        super().__init__(module_name, input_shape, model_params, test_num)
+class TestLossBase(TestBase):
+    def __init__(self, module_name: str, input_shape: str = "Batch, Label") -> None:
+        super().__init__(module_name, input_shape)
+        self.type = type
+
+    def forward_test(self, test_id: int) -> bool:
+        batch, label = self.inputs[test_id].shape
+        self.target = Tensor(np.random.randint(0, label, size=(batch, )))
+
+        self.torch_input = torch.tensor(self.inputs[test_id], dtype=torch.float64, requires_grad=True)
+        self.torch_target = torch.tensor(self.target, dtype=torch.long)
+
+        loss_func = torch.nn.CrossEntropyLoss()
+        self.torch_out = loss_func(self.torch_input, self.torch_target)
+        
+        self.net_out = self.nets[test_id](self.inputs[test_id], self.target)
+        if self.net_out is None:
+            return False
+        return isclose(self.net_out, self.torch_out.detach().numpy()).all().item()
+    
+    def backward_test(self, test_id: int) -> bool:
+        if self.net_out is None:
+            return False
+        self.net_grad = self.nets[test_id].backward()
+        if self.net_grad is None:
+            return False
+        self.torch_out.retain_grad()
+        self.torch_out.sum().backward()
+        self.torch_grad = self.torch_input.grad
+        return isclose(self.net_grad, self.torch_grad.detach().numpy()).all().item()
+
+
+class TestCrossEntropyLoss(TestLossBase):
+    def __init__(self) -> None:
+        super().__init__("CrossEntropyLoss")
+
+    def forward_test(self, test_id: int) -> bool:
+        return super().forward_test(test_id)
+    
+    def backward_test(self, test_id: int) -> bool:
+        return super().backward_test(test_id)
 
 
 if __name__ == '__main__':
     TestLinear()()
+    TestSigmoid()()
+    TestReLU()()
+    TestCrossEntropyLoss()()
