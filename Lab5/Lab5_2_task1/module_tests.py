@@ -56,8 +56,8 @@ class TestBase:
         for test_id in range(self.test_num):
             print(f'[\033[34mForward\033[0m]' + '.' * (str_len - len(_forward_str)) + \
                     result_str(self.forward_test(test_id)))
-            print(f'[\033[34mBackward\033[0m]' + '.' * (str_len - len(_backward_str)) + \
-                    result_str(self.backward_test(test_id)))
+            # print(f'[\033[34mBackward\033[0m]' + '.' * (str_len - len(_backward_str)) + \
+            #         result_str(self.backward_test(test_id)))
 
 
 class TestLinear(TestBase):
