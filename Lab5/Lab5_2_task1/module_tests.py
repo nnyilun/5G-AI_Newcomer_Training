@@ -89,3 +89,52 @@ class TestSigmoid(TestBase):
     
     def backward_test(self, test_id: int) -> bool:
         return super().backward_test(test_id)
+    
+
+class TestLossBase(TestBase):
+    def __init__(self, module_name: str, input_shape: str = "Batch, Label") -> None:
+        super().__init__(module_name, input_shape)
+        self.type = type
+
+    def forward_test(self, test_id: int) -> bool:
+        batch, label = self.inputs[test_id].shape
+        self.target = Tensor(np.random.randint(0, label, size=(batch, )))
+
+        self.torch_input = torch.tensor(self.inputs[test_id], dtype=torch.float64, requires_grad=True)
+        self.torch_target = torch.tensor(self.target, dtype=torch.long)
+
+        loss_func = torch.nn.CrossEntropyLoss()
+        self.torch_out = loss_func(self.torch_input, self.torch_target)
+        
+        self.net_out = self.nets[test_id](self.inputs[test_id], self.target)
+        if self.net_out is None:
+            return False
+        return isclose(self.net_out, self.torch_out.detach().numpy()).all().item()
+    
+    def backward_test(self, test_id: int) -> bool:
+        if self.net_out is None:
+            return False
+        self.net_grad = self.nets[test_id].backward()
+        if self.net_grad is None:
+            return False
+        self.torch_out.retain_grad()
+        self.torch_out.sum().backward()
+        self.torch_grad = self.torch_input.grad
+        return isclose(self.net_grad, self.torch_grad.detach().numpy()).all().item()
+
+
+class TestCrossEntropyLoss(TestLossBase):
+    def __init__(self) -> None:
+        super().__init__("CrossEntropyLoss")
+
+    def forward_test(self, test_id: int) -> bool:
+        return super().forward_test(test_id)
+    
+    def backward_test(self, test_id: int) -> bool:
+        return super().backward_test(test_id)
+    
+
+if __name__ == '__main__':
+    TestLinear()()
+    TestSigmoid()()
+    TestCrossEntropyLoss()()
